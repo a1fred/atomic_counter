@@ -3,7 +3,7 @@ import sys
 import asyncio
 import random
 
-from atomic_counter.persistence.base import PersistenceBackend
+from atomic_counter.persistence import FilePersistenceBackend
 
 
 MAX_VALUE = sys.maxsize
@@ -15,7 +15,7 @@ class AtomicCounter:
         self,
         initial: int = 0,
         max_value: int = MAX_VALUE, increment_by: int = INCREMENT_BY,
-        persistence_backend: Optional[PersistenceBackend] = None,
+        persistence_backend: Optional[FilePersistenceBackend] = None,
         persistence_factor: int = 1,
     ):
         self.persistence_backend = persistence_backend
@@ -36,7 +36,7 @@ class AtomicCounter:
                 self.value %= self.max_value
 
             if random.randrange(self.persistence_factor) == 0:
-                await self.persistence_backend.set_value(self.value)
+                await self.persistence_backend.save(self)
 
             return self.value
 

@@ -1,4 +1,8 @@
 # Atomic counter as a service
+* Rest api
+* Persisted
+* Multiple counters supported
+
 
 ## Run
 make server

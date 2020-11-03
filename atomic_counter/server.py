@@ -5,7 +5,7 @@ import logging
 from aiohttp import web
 
 from atomic_counter import counter
-from atomic_counter.persistence.file import FilePersistenceBackend
+from atomic_counter.persistence import FilePersistenceBackend
 
 
 logger = logging.getLogger(__name__)
@@ -16,15 +16,19 @@ async def get_app(datadir: Optional[str]) -> web.Application:
 
     async def get_default_counter(namespace: str) -> counter.AtomicCounter:
         persistence_backend = None
-        initial = 0
+        data = {
+            "initial": 0,
+            "max_value": 100,
+        }
 
         if datadir is not None:
             persistence_backend = FilePersistenceBackend(path=os.path.join(datadir, namespace))
-            initial = await persistence_backend.get_value() or 0
+            loaded_data = await persistence_backend.load()
+            if loaded_data is not None:
+                data = loaded_data
 
         return counter.AtomicCounter(
-            initial=initial,
-            max_value=100,
+            **data,
             persistence_backend=persistence_backend,
             persistence_factor=1,
         )
@@ -51,7 +55,14 @@ async def get_app(datadir: Optional[str]) -> web.Application:
 
     class Index(web.View):
         async def get(self):
-            return web.json_response(data=list(counter_repository.counters.keys()))
+            data = {}
+
+            for ns, cnt in counter_repository.counters.items():
+                data[ns] = {
+                    'value': cnt.value,
+                    'max_value': cnt.max_value,
+                }
+            return web.json_response(data=data)
 
     app = web.Application()
     app.add_routes([web.get('/', Index)])
