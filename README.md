@@ -5,7 +5,7 @@
 
 
 ## Run
-make server
+python -m atomic_counter --datadir=./data
 
 ## Get counters
 GET /

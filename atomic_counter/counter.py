@@ -1,9 +1,12 @@
-from typing import Optional
+from typing import Dict
 import sys
 import asyncio
-import random
+import os
+import logging
 
 from atomic_counter.persistence import FilePersistenceBackend
+
+logger = logging.getLogger(__name__)
 
 
 MAX_VALUE = sys.maxsize
@@ -13,13 +16,11 @@ INCREMENT_BY = 1
 class AtomicCounter:
     def __init__(
         self,
-        initial: int = 0,
+        persistence_backend: FilePersistenceBackend,
+        initial: int,
         max_value: int = MAX_VALUE, increment_by: int = INCREMENT_BY,
-        persistence_backend: Optional[FilePersistenceBackend] = None,
-        persistence_factor: int = 1,
     ):
         self.persistence_backend = persistence_backend
-        self.persistence_factor = persistence_factor
 
         self.value = initial
 
@@ -35,23 +36,54 @@ class AtomicCounter:
             if self.value > self.max_value:
                 self.value %= self.max_value
 
-            if random.randrange(self.persistence_factor) == 0:
-                await self.persistence_backend.save(self)
-
             return self.value
 
 
 class CounterRespoitory:
-    def __init__(self):
-        self.counters = {}
+    def __init__(self, datadir: str):
+        self.counters: Dict[str, AtomicCounter] = {}
+        self.datadir = datadir
         self._lock = asyncio.Lock()
 
-    async def get_counter(self, namespace: str, default_getter) -> AtomicCounter:
-        result = self.counters.setdefault(namespace, None)
+    async def load(self):
+        os.makedirs(self.datadir, exist_ok=True)
+        for statefile in os.listdir(self.datadir):
+            logger.info(f"Loaded counter: {statefile}")
+            self.counters[statefile] = await self.get_default_counter(statefile)
+
+    async def save(self, namespace: str):
+        assert namespace in self.counters
+        counter_inst = self.counters[namespace]
+        data = {
+            "initial": counter_inst.value,
+            "max_value": counter_inst.max_value,
+        }
+        await counter_inst.persistence_backend.save(data)
+
+    async def get_default_counter(self, namespace: str) -> AtomicCounter:
+        persistence_backend = None
+        data = {
+            "initial": 0,
+            "max_value": 100,
+        }
+
+        if self.datadir is not None:
+            persistence_backend = FilePersistenceBackend(path=os.path.join(self.datadir, namespace))
+            loaded_data = await persistence_backend.load()
+            if loaded_data is not None:
+                data = loaded_data
+
+        return AtomicCounter(
+            persistence_backend=persistence_backend,
+            **data,
+        )
+
+    async def get_counter(self, namespace: str) -> AtomicCounter:
+        result = self.counters.setdefault(namespace, None)  # type:ignore
         if result is not None:
             return result
 
         async with self._lock:
-            new_counter = await default_getter(namespace)
+            new_counter = await self.get_default_counter(namespace)
             self.counters[namespace] = new_counter
             return new_counter

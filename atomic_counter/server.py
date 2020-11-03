@@ -1,48 +1,22 @@
-from typing import Optional
-import os
 import logging
+import random
 
 from aiohttp import web
-
 from atomic_counter import counter
-from atomic_counter.persistence import FilePersistenceBackend
 
 
 logger = logging.getLogger(__name__)
 
 
-async def get_app(datadir: Optional[str]) -> web.Application:
-    counter_repository = counter.CounterRespoitory()
-
-    async def get_default_counter(namespace: str) -> counter.AtomicCounter:
-        persistence_backend = None
-        data = {
-            "initial": 0,
-            "max_value": 100,
-        }
-
-        if datadir is not None:
-            persistence_backend = FilePersistenceBackend(path=os.path.join(datadir, namespace))
-            loaded_data = await persistence_backend.load()
-            if loaded_data is not None:
-                data = loaded_data
-
-        return counter.AtomicCounter(
-            **data,
-            persistence_backend=persistence_backend,
-            persistence_factor=1,
-        )
-
-    if datadir is not None:
-        os.makedirs(datadir, exist_ok=True)
-        for statefile in os.listdir(datadir):
-            logger.info(f"Loaded counter: {statefile}")
-            counter_repository.counters[statefile] = await get_default_counter(statefile)
+async def get_app(datadir: str) -> web.Application:
+    persistence_rate = 1
+    counter_repository = counter.CounterRespoitory(datadir=datadir)
+    await counter_repository.load()
 
     class CounterView(web.View):
         async def get_counter(self) -> counter.AtomicCounter:
             namespace = self.request.match_info['namespace']
-            return await counter_repository.get_counter(namespace=namespace, default_getter=get_default_counter)
+            return await counter_repository.get_counter(namespace=namespace)
 
         async def head(self):
             counter = await self.get_counter()
@@ -51,6 +25,10 @@ async def get_app(datadir: Optional[str]) -> web.Application:
         async def get(self):
             counter = await self.get_counter()
             val = await counter.increment()
+
+            if random.randrange(persistence_rate) == 0:
+                await counter_repository.save(self.request.match_info['namespace'])
+
             return web.Response(text=str(val))
 
     class Index(web.View):
